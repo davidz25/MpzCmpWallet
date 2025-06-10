@@ -1,5 +1,11 @@
 package org.multipaz.samples.wallet.cmp
 
 import androidx.compose.ui.window.ComposeUIViewController
+import kotlinx.coroutines.runBlocking
+import org.multipaz.prompt.IosPromptModel
 
-fun MainViewController() = ComposeUIViewController { App() }
+private val app = App.getInstance(IosPromptModel())
+
+fun MainViewController() = ComposeUIViewController {
+  app.Content()
+}

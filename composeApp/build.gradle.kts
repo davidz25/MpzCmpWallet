@@ -33,6 +33,7 @@ kotlin {
         androidMain.dependencies {
             implementation(compose.preview)
             implementation(libs.androidx.activity.compose)
+            implementation(libs.androidx.appcompat)
         }
         commonMain.dependencies {
             implementation(compose.runtime)
@@ -43,6 +44,12 @@ kotlin {
             implementation(compose.components.uiToolingPreview)
             implementation(libs.androidx.lifecycle.viewmodel)
             implementation(libs.androidx.lifecycle.runtimeCompose)
+            implementation(libs.kotlinx.io.bytestring)
+            implementation(libs.kotlinx.datetime)
+            implementation(libs.multipaz)
+            implementation(libs.multipaz.doctypes)
+            implementation(libs.multipaz.models)
+            implementation(libs.multipaz.compose)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)
@@ -64,7 +71,7 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
-        }
+            excludes += listOf("/META-INF/versions/9/OSGI-INF/MANIFEST.MF")        }
     }
     buildTypes {
         getByName("release") {
