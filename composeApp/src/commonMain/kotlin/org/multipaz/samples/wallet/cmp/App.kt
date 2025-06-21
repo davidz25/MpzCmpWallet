@@ -32,10 +32,12 @@ import mpzcmpwallet.composeapp.generated.resources.compose_multiplatform
 import org.jetbrains.compose.resources.painterResource
 import org.multipaz.asn1.ASN1Integer
 import org.multipaz.cbor.Simple
-import org.multipaz.compose.generateQrCode
 import org.multipaz.compose.permissions.rememberBluetoothPermissionState
 import org.multipaz.compose.presentment.Presentment
 import org.multipaz.compose.prompt.PromptDialogs
+import org.multipaz.compose.qrcode.generateQrCode
+import org.multipaz.compose.qrcode.QrCodeDisplay
+import org.multipaz.compose.qrcode.startQrPresentment
 import org.multipaz.crypto.Algorithm
 import org.multipaz.crypto.Crypto
 import org.multipaz.crypto.EcCurve
@@ -106,77 +108,9 @@ class App(val promptModel: PromptModel) {
                 addDocumentType(DrivingLicense.getDocumentType())
             }
             documentStore = buildDocumentStore(storage = storage, secureAreaRepository = secureAreaRepository) {}
-            if (documentStore.listDocuments().isEmpty()) {
-                val now = Clock.System.now()
-                val signedAt = now
-                val validFrom = now
-                val validUntil = now + 365.days
-                val iacaKey = Crypto.createEcPrivateKey(EcCurve.P256)
-                val iacaCert = MdocUtil.generateIacaCertificate(
-                    iacaKey = iacaKey,
-                    subject = X500Name.fromName(name = "CN=Test IACA Key"),
-                    serial = ASN1Integer.fromRandom(numBits = 128),
-                    validFrom = validFrom,
-                    validUntil = validUntil,
-                    issuerAltNameUrl = "https://issuer.example.com",
-                    crlUrl = "https://issuer.example.com/crl"
-                )
-                val dsKey = Crypto.createEcPrivateKey(EcCurve.P256)
-                val dsCert = MdocUtil.generateDsCertificate(
-                    iacaCert = iacaCert,
-                    iacaKey = iacaKey,
-                    dsKey = dsKey.publicKey,
-                    subject = X500Name.fromName(name = "CN=Test DS Key"),
-                    serial = ASN1Integer.fromRandom(numBits = 128),
-                    validFrom = validFrom,
-                    validUntil = validUntil
-                )
-                val document = documentStore.createDocument(
-                    displayName = "Erika's Driving License",
-                    typeDisplayName = "Utopia Driving License",
-                )
-                val mdocCredential =
-                    DrivingLicense.getDocumentType().createMdocCredentialWithSampleData(
-                        document = document,
-                        secureArea = secureArea,
-                        createKeySettings = CreateKeySettings(
-                            algorithm = Algorithm.ESP256,
-                            nonce = "Challenge".encodeToByteString(),
-                            userAuthenticationRequired = true
-                        ),
-                        dsKey = dsKey,
-                        dsCertChain = X509CertChain(listOf(dsCert)),
-                        signedAt = signedAt,
-                        validFrom = validFrom,
-                        validUntil = validUntil,
-                    )
-            }
-            readerTrustManager = TrustManager().apply {
-                val readerRootCert = X509Cert.fromPem(
-                    """
-                        -----BEGIN CERTIFICATE-----
-                        MIICUTCCAdegAwIBAgIQppKZHI1iPN290JKEA79OpzAKBggqhkjOPQQDAzArMSkwJwYDVQQDDCBP
-                        V0YgTXVsdGlwYXogVGVzdEFwcCBSZWFkZXIgUm9vdDAeFw0yNDEyMDEwMDAwMDBaFw0zNDEyMDEw
-                        MDAwMDBaMCsxKTAnBgNVBAMMIE9XRiBNdWx0aXBheiBUZXN0QXBwIFJlYWRlciBSb290MHYwEAYH
-                        KoZIzj0CAQYFK4EEACIDYgAE+QDye70m2O0llPXMjVjxVZz3m5k6agT+wih+L79b7jyqUl99sbeU
-                        npxaLD+cmB3HK3twkA7fmVJSobBc+9CDhkh3mx6n+YoH5RulaSWThWBfMyRjsfVODkosHLCDnbPV
-                        o4G/MIG8MA4GA1UdDwEB/wQEAwIBBjASBgNVHRMBAf8ECDAGAQH/AgEAMFYGA1UdHwRPME0wS6BJ
-                        oEeGRWh0dHBzOi8vZ2l0aHViLmNvbS9vcGVud2FsbGV0LWZvdW5kYXRpb24tbGFicy9pZGVudGl0
-                        eS1jcmVkZW50aWFsL2NybDAdBgNVHQ4EFgQUq2Ub4FbCkFPx3X9s5Ie+aN5gyfUwHwYDVR0jBBgw
-                        FoAUq2Ub4FbCkFPx3X9s5Ie+aN5gyfUwCgYIKoZIzj0EAwMDaAAwZQIxANN9WUvI1xtZQmAKS4/D
-                        ZVwofqLNRZL/co94Owi1XH5LgyiBpS3E8xSxE9SDNlVVhgIwKtXNBEBHNA7FKeAxKAzu4+MUf4gz
-                        8jvyFaE0EUVlS2F5tARYQkU6udFePucVdloi
-                        -----END CERTIFICATE-----
-                    """.trimIndent().trim()
-                )
-                addTrustPoint(
-                    TrustPoint(
-                        certificate = readerRootCert,
-                        displayName = "OWF Multipaz TestApp",
-                        displayIcon = null
-                    )
-                )
-            }
+
+            createSampleDocument(documentStore, secureArea)
+            readerTrustManager = createTestTrustManager()
         }
     }
 
@@ -221,129 +155,65 @@ class App(val promptModel: PromptModel) {
                     }
                 }
             } else {
-                val deviceEngagement = remember { mutableStateOf<ByteString?>(null) }
-                val state = presentmentModel.state.collectAsState()
-                when (state.value) {
-                    PresentmentModel.State.IDLE -> {
-                        showQrButton(deviceEngagement)
-                    }
-
-                    PresentmentModel.State.CONNECTING -> {
-                        showQrCode(deviceEngagement)
-                    }
-
-                    PresentmentModel.State.WAITING_FOR_SOURCE,
-                    PresentmentModel.State.PROCESSING,
-                    PresentmentModel.State.WAITING_FOR_DOCUMENT_SELECTION,
-                    PresentmentModel.State.WAITING_FOR_CONSENT,
-                    PresentmentModel.State.COMPLETED -> {
-                        Presentment(
-                            presentmentModel = presentmentModel,
-                            promptModel = promptModel,
-                            documentTypeRepository = documentTypeRepository,
-                            source = SimplePresentmentSource(
-                                documentStore = documentStore,
-                                documentTypeRepository = documentTypeRepository,
-                                readerTrustManager = readerTrustManager,
-                                preferSignatureToKeyAgreement = true,
-                                domainMdocSignature = "mdoc",
-                            ),
-                            onPresentmentComplete = {
-                                presentmentModel.reset()
-                            },
-                            appName = "MpzCmpWallet",
-                            appIconPainter = painterResource(Res.drawable.compose_multiplatform),
-                            modifier = Modifier
-                        )
-                    }
-                }
+                PresentmentScreen()
             }
         }
     }
 
     @Composable
-    private fun showQrButton(showQrCode: MutableState<ByteString?>) {
+    private fun PresentmentScreen() {
+        val deviceEngagement = remember { mutableStateOf<ByteString?>(null) }
+        val state = presentmentModel.state.collectAsState()
+
+        when (state.value) {
+            PresentmentModel.State.IDLE -> showQrButton(deviceEngagement)
+            PresentmentModel.State.CONNECTING -> showQrCode(deviceEngagement)
+            else -> PresentmentContent()
+        }
+    }
+
+    @Composable
+    private fun showQrButton(deviceEngagement: MutableState<ByteString?>) {
         Column(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Button(onClick = {
-                presentmentModel.reset()
-                presentmentModel.setConnecting()
-                presentmentModel.presentmentScope.launch() {
-                    val connectionMethods = listOf(
-                        MdocConnectionMethodBle(
-                            supportsPeripheralServerMode = false,
-                            supportsCentralClientMode = true,
-                            peripheralServerModeUuid = null,
-                            centralClientModeUuid = UUID.randomUUID(),
-                        )
-                    )
-                    val eDeviceKey = Crypto.createEcPrivateKey(EcCurve.P256)
-                    val advertisedTransports = connectionMethods.advertise(
-                        role = MdocRole.MDOC,
-                        transportFactory = MdocTransportFactory.Default,
-                        options = MdocTransportOptions(bleUseL2CAP = true),
-                    )
-                    val engagementGenerator = EngagementGenerator(
-                        eSenderKey = eDeviceKey.publicKey,
-                        version = "1.0"
-                    )
-                    engagementGenerator.addConnectionMethods(advertisedTransports.map {
-                        it.connectionMethod
-                    })
-                    val encodedDeviceEngagement = ByteString(engagementGenerator.generate())
-                    showQrCode.value = encodedDeviceEngagement
-                    val transport = advertisedTransports.waitForConnection(
-                        eSenderKey = eDeviceKey.publicKey,
-                        coroutineScope = presentmentModel.presentmentScope
-                    )
-                    presentmentModel.setMechanism(
-                        MdocPresentmentMechanism(
-                            transport = transport,
-                            eDeviceKey = eDeviceKey,
-                            encodedDeviceEngagement = encodedDeviceEngagement,
-                            handover = Simple.NULL,
-                            engagementDuration = null,
-                            allowMultipleRequests = false
-                        )
-                    )
-                    showQrCode.value = null
+            Button(
+                onClick = {
+                    startQrPresentment(presentmentModel, deviceEngagement)
                 }
-            }) {
-                Text("Present mDL via QR")
+            ) {
+                Text(text = "Present QR Code")
             }
         }
     }
 
     @Composable
     private fun showQrCode(deviceEngagement: MutableState<ByteString?>) {
-        Column(
-            modifier = Modifier.fillMaxSize().padding(16.dp),
-            verticalArrangement = Arrangement.Center,
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            if (deviceEngagement.value != null) {
-                val mdocUrl = "mdoc:" + deviceEngagement.value!!.toByteArray().toBase64Url()
-                val qrCodeBitmap = remember { generateQrCode(mdocUrl) }
-                Text(text = "Present QR code to mdoc reader")
-                Image(
-                    modifier = Modifier.fillMaxWidth(),
-                    bitmap = qrCodeBitmap,
-                    contentDescription = null,
-                    contentScale = ContentScale.FillWidth
-                )
-                Button(
-                    onClick = {
-                        presentmentModel.reset()
-                    }
-                ) {
-                    Text("Cancel")
-                }
-            }
-        }
+        QrCodeDisplay(
+            deviceEngagement = deviceEngagement,
+            onCancel = { presentmentModel.reset() }
+        )
     }
+
+    @Composable
+    fun PresentmentContent() = Presentment(
+        presentmentModel = presentmentModel,
+        promptModel = promptModel,
+        documentTypeRepository = documentTypeRepository,
+        source = SimplePresentmentSource(
+            documentStore = documentStore,
+            documentTypeRepository = documentTypeRepository,
+            readerTrustManager = readerTrustManager,
+            preferSignatureToKeyAgreement = true,
+            domainMdocSignature = "mdoc",
+        ),
+        onPresentmentComplete = { presentmentModel.reset() },
+        appName = "MpzCmpWallet",
+        appIconPainter = painterResource(Res.drawable.compose_multiplatform),
+        modifier = Modifier
+    )
 
     companion object {
         private var app: App? = null
@@ -357,3 +227,5 @@ class App(val promptModel: PromptModel) {
         }
     }
 }
+
+
